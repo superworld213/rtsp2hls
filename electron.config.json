@@ -1,0 +1,28 @@
+{
+  "files": [
+    "dist/**/*",
+    "electron/**/*",
+    "package.json"
+  ],
+  "extraMetadata": {
+    "debug": true
+  },
+  "productName": "RTSP2HLS",
+  "extraFiles": [],
+  "directories": {
+    "output": "./builder"
+  },
+  "win": {
+    "target": "nsis"
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowElevation": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "RTSP2HLS",
+    "perMachine": true
+  },
+  "asar": false,
+  "asarUnpack": "**/*.node"
+}
