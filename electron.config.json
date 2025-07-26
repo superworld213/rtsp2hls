@@ -2,7 +2,8 @@
   "files": [
     "dist/**/*",
     "electron/**/*",
-    "package.json"
+    "package.json",
+    "ffmpeg/**/*"
   ],
   "extraMetadata": {
     "debug": true

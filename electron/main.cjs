@@ -33,7 +33,22 @@ function startHttpServer() {
       return;
     }
 
-    const filePath = path.join(OUTPUT_DIR, req.url);
+    // 处理API请求
+    if (req.url.startsWith('/api/')) {
+      handleApiRequest(req, res);
+      return;
+    }
+
+    // 处理HLS文件请求
+    let filePath;
+    if (req.url.startsWith('/hls/')) {
+      // 移除/hls/前缀
+      const fileName = req.url.substring(5);
+      filePath = path.join(OUTPUT_DIR, fileName);
+    } else {
+      // 直接访问文件
+      filePath = path.join(OUTPUT_DIR, req.url);
+    }
 
     fs.readFile(filePath, (err, content) => {
       if (err) {
@@ -56,17 +71,19 @@ function startHttpServer() {
       }
     });
   }).listen(HTTP_PORT, () => {
-    console.log(`HTTP server listening on port ${HTTP_PORT}`);
+    console.log(`HTTP服务器已启动，端口: ${HTTP_PORT}`);
+    console.log(`HLS文件访问地址: http://localhost:${HTTP_PORT}/hls/`);
+    console.log(`API端点: http://localhost:${HTTP_PORT}/api/`);
   });
 
   httpServer.on('error', (error) => {
-    console.error('HTTP server error:', error);
+    console.error('HTTP服务器启动失败:', error);
   });
 }
 
 // 获取本地FFmpeg路径
 function getFFmpegPath() {
-  const ffmpegPath = path.join(__dirname, '../public/ffmpeg/bin/ffmpeg.exe');
+  const ffmpegPath = path.join(__dirname, '../ffmpeg/bin/ffmpeg.exe');
   return ffmpegPath;
 }
 
@@ -110,6 +127,7 @@ function createWindow() {
     mainWindow.loadURL('http://localhost:5173');
     mainWindow.webContents.openDevTools();
   } else {
+    mainWindow.webContents.openDevTools();
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
   }
 }
@@ -119,13 +137,30 @@ app.whenReady().then(() => {
   startHttpServer();
 });
 
-app.on('window-all-closed', () => {
-  // 关闭所有FFmpeg进程
+// 应用退出前的清理工作
+app.on('before-quit', (event) => {
+  console.log('应用即将退出，正在清理资源...');
+  
+  // 阻止默认退出行为，先进行清理
+  event.preventDefault();
+  
+  // 清理所有FFmpeg进程
   killAllFFmpegProcesses();
+  
   // 关闭HTTP服务器
   if (httpServer) {
-    httpServer.close();
+    httpServer.close(() => {
+      console.log('HTTP服务器已关闭');
+      // 清理完成后真正退出应用
+      app.exit(0);
+    });
+  } else {
+    // 如果没有HTTP服务器，直接退出
+    app.exit(0);
   }
+});
+
+app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
   }
@@ -137,18 +172,104 @@ app.on('activate', () => {
   }
 });
 
+// 处理进程信号，确保在强制退出时也能清理资源
+process.on('SIGINT', () => {
+  console.log('收到SIGINT信号，正在清理资源...');
+  killAllFFmpegProcesses();
+  if (httpServer) {
+    httpServer.close();
+  }
+  process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+  console.log('收到SIGTERM信号，正在清理资源...');
+  killAllFFmpegProcesses();
+  if (httpServer) {
+    httpServer.close();
+  }
+  process.exit(0);
+});
+
+// Windows系统的关闭信号
+if (process.platform === 'win32') {
+  process.on('SIGBREAK', () => {
+    console.log('收到SIGBREAK信号，正在清理资源...');
+    killAllFFmpegProcesses();
+    if (httpServer) {
+      httpServer.close();
+    }
+    process.exit(0);
+  });
+}
+
+// 清理output目录中的缓存文件
+function cleanOutputCache() {
+  try {
+    console.log('正在清理output目录缓存文件...');
+    
+    if (fs.existsSync(OUTPUT_DIR)) {
+      const files = fs.readdirSync(OUTPUT_DIR);
+      let deletedCount = 0;
+      
+      files.forEach(file => {
+        const filePath = path.join(OUTPUT_DIR, file);
+        const ext = path.extname(file).toLowerCase();
+        
+        // 删除.m3u8和.ts文件
+        if (ext === '.m3u8' || ext === '.ts') {
+          try {
+            fs.unlinkSync(filePath);
+            deletedCount++;
+            console.log(`已删除缓存文件: ${file}`);
+          } catch (error) {
+            console.error(`删除文件 ${file} 时出错:`, error);
+          }
+        }
+      });
+      
+      console.log(`缓存清理完成，共删除 ${deletedCount} 个文件`);
+    } else {
+      console.log('output目录不存在，无需清理');
+    }
+  } catch (error) {
+    console.error('清理output缓存时出错:', error);
+  }
+}
+
 // FFmpeg进程管理函数
 function killAllFFmpegProcesses() {
+  console.log(`正在关闭 ${ffmpegProcesses.size} 个FFmpeg进程...`);
+  
   ffmpegProcesses.forEach((process, id) => {
     try {
       if (process && !process.killed) {
+        console.log(`正在关闭FFmpeg进程: ${id}`);
+        
+        // 首先尝试优雅关闭
         process.kill('SIGTERM');
+        
+        // 设置超时强制关闭
+        setTimeout(() => {
+          if (process && !process.killed) {
+            console.log(`强制关闭FFmpeg进程: ${id}`);
+            process.kill('SIGKILL');
+          }
+        }, 3000); // 3秒后强制关闭
       }
     } catch (error) {
-      console.error(`Error killing FFmpeg process ${id}:`, error);
+      console.error(`关闭FFmpeg进程 ${id} 时出错:`, error);
     }
   });
+  
+  // 清空进程映射和错误信息
   ffmpegProcesses.clear();
+  ffmpegErrors.clear();
+  
+  console.log('所有FFmpeg进程清理完成');
+  
+  // 清理output目录缓存文件
+  cleanOutputCache();
 }
 
 function killFFmpegProcess(id) {
@@ -185,15 +306,33 @@ ipcMain.handle('start-ffmpeg-stream', async (event, config) => {
 
     const outputPath = path.join(outputDir, `${id}.m3u8`);
     
-    // FFmpeg命令参数
+    // FFmpeg命令参数 - 优化低延时配置
     const ffmpegArgs = [
+      // 输入流优化参数
+      '-fflags', 'nobuffer+fastseek+flush_packets',
+      '-flags', 'low_delay',
+      '-probesize', '32',
+      '-analyzeduration', '100000', // 0.1秒
+      '-max_delay', '0',
+      '-rtsp_transport', 'tcp', // 使用TCP传输更稳定
       '-i', rtspUrl,
+      // 编码器优化参数
       '-c:v', options.videoCodec || 'libx264',
+      '-preset', 'ultrafast', // 最快编码预设
+      '-tune', 'zerolatency', // 零延时调优
+      '-g', '15', // GOP大小，降低关键帧间隔
+      '-keyint_min', '15',
+      '-sc_threshold', '0', // 禁用场景切换检测
       '-c:a', options.audioCodec || 'aac',
+      '-ac', '2', // 双声道
+      '-ar', '44100', // 音频采样率
+      // HLS输出优化参数
       '-f', 'hls',
-      '-hls_time', options.hlsTime || '10',
-      '-hls_list_size', options.hlsListSize || '6',
-      '-hls_flags', 'delete_segments',
+      '-hls_time', options.hlsTime || '1', // 1秒分片
+      '-hls_list_size', options.hlsListSize || '3', // 减少播放列表大小
+      '-hls_flags', 'delete_segments+independent_segments',
+      '-hls_segment_type', 'mpegts',
+      '-hls_allow_cache', '0', // 禁用缓存
       '-y', // 覆盖输出文件
       outputPath
     ];
@@ -382,26 +521,11 @@ ipcMain.handle('clear-ffmpeg-error', async (event, id) => {
   return { success: true };
 });
 
-// 启动HTTP服务器
-function startHttpServer() {
-  const app = express();
+// 处理API请求
+function handleApiRequest(req, res) {
+  const url = new URL(req.url, `http://localhost:${HTTP_PORT}`);
   
-  // 启用CORS
-  app.use(cors());
-  
-  // 设置静态文件服务，提供HLS文件
-  app.use('/hls', express.static(OUTPUT_DIR, {
-    setHeaders: (res, path) => {
-      if (path.endsWith('.m3u8')) {
-        res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
-      } else if (path.endsWith('.ts')) {
-        res.setHeader('Content-Type', 'video/mp2t');
-      }
-    }
-  }));
-  
-  // 获取所有可用的视频流列表
-  app.get('/api/streams', (req, res) => {
+  if (url.pathname === '/api/streams') {
     try {
       const streams = [];
       if (fs.existsSync(OUTPUT_DIR)) {
@@ -419,42 +543,34 @@ function startHttpServer() {
           }
         });
       }
-      res.json({ streams });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ streams }));
     } catch (error) {
-      res.status(500).json({ error: error.message });
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: error.message }));
     }
-  });
-  
-  // 获取特定流的信息
-  app.get('/api/stream/:id', (req, res) => {
-    const { id } = req.params;
+  } else if (url.pathname.startsWith('/api/stream/')) {
+    const id = url.pathname.split('/api/stream/')[1];
     const m3u8Path = path.join(OUTPUT_DIR, `${id}.m3u8`);
     
     if (fs.existsSync(m3u8Path)) {
-      res.json({
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
         id,
         url: `http://localhost:${HTTP_PORT}/hls/${id}.m3u8`,
         available: true
-      });
+      }));
     } else {
-      res.status(404).json({ error: 'Stream not found' });
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Stream not found' }));
     }
-  });
-  
-  // 健康检查端点
-  app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', port: HTTP_PORT });
-  });
-  
-  httpServer = app.listen(HTTP_PORT, () => {
-    console.log(`HTTP服务器已启动，端口: ${HTTP_PORT}`);
-    console.log(`HLS文件访问地址: http://localhost:${HTTP_PORT}/hls/`);
-    console.log(`API端点: http://localhost:${HTTP_PORT}/api/`);
-  });
-  
-  httpServer.on('error', (error) => {
-    console.error('HTTP服务器启动失败:', error);
-  });
+  } else if (url.pathname === '/api/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'ok', port: HTTP_PORT }));
+  } else {
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'API endpoint not found' }));
+  }
 }
 
 // 获取HTTP服务器信息
