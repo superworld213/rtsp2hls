@@ -5,13 +5,13 @@ const ffmpeg = require("fluent-ffmpeg");
 const { initServer } = require("./server/index");
 const os = require("os");
 
-// 日志工具函数，添加时间戳并区分日志级别
+// Log utility function, adds timestamp and distinguishes log levels
 const log = (level, message) => {
   const timestamp = new Date().toISOString();
   console.log(`[${timestamp}] [${level.toUpperCase()}] ${message}`);
 };
 
-// 应用状态管理
+// Application state management
 class AppState {
   constructor() {
     this.isStopStream = false;
@@ -20,16 +20,16 @@ class AppState {
   }
 }
 
-// 应用状态单例
+// Application state singleton
 const appState = new AppState();
 
-// 流处理相关类，管理流转换进程
+// Stream processing related class, manages stream conversion processes
 class StreamManager {
   constructor() {
     this.streamProcesses = appState.streamProcesses;
   }
 
-  // 获取m3u8目录
+  // Get m3u8 directory
   getM3u8Dir() {
     return path.join(
         os.homedir(),
@@ -40,7 +40,7 @@ class StreamManager {
     );
   }
 
-  // 启动流转换
+  // Start stream conversion
   async startStream(rtspUrl, streamId) {
     appState.isStopStream = false;
 
@@ -80,25 +80,25 @@ class StreamManager {
             .run();
       });
     } catch (error) {
-      log("error", `启动流失败: ${error.message}`);
+      log("error", `Failed to start stream: ${error.message}`);
       throw error;
     }
   }
 
-  // 确保目录存在
+  // Ensure directory exists
   async ensureDirectoryExists(dirPath) {
     try {
       await fs.access(dirPath);
     } catch {
       await fs.mkdir(dirPath, { recursive: true });
-      log("info", `创建目录成功: ${dirPath}`);
+      log("info", `Directory created successfully: ${dirPath}`);
     }
   }
 
-  // 检查文件是否存在，存在则返回相关信息
+  // Check if file exists, return related information if it exists
   checkFileExists(filePath, streamId, resolve, reject) {
     if (appState.isStopStream) {
-      reject("流已停止");
+      reject("Stream stopped");
       return;
     }
 
@@ -116,40 +116,40 @@ class StreamManager {
         .catch((error) => {
           if (error.code === "ENOENT") {
             setTimeout(() => this.checkFileExists(filePath, streamId, resolve, reject), 100);
-            log("info", "文件暂不存在，继续检查中...");
+            log("info", "File does not exist yet, continuing to check...");
           } else {
-            log("error", `检查文件时出错: ${error.message}`);
+            log("error", `Error checking file: ${error.message}`);
             reject(error.message);
           }
         });
   }
 
-  // 停止单个流
+  // Stop single stream
   stopStream(streamId) {
     const process = this.streamProcesses.get(streamId);
     if (process) {
       try {
-        log("info", `停止流: ${streamId}`);
+        log("info", `Stopping stream: ${streamId}`);
         process.kill();
         this.streamProcesses.delete(streamId);
       } catch (e) {
-        log("error", `停止流 ${streamId} 时出错: ${e}`);
-        dialog.showErrorBox("停止流错误", e.message);
+        log("error", `Error stopping stream ${streamId}: ${e}`);
+        dialog.showErrorBox("Stream Stop Error", e.message);
       }
     }
   }
 
-  // 停止所有流
+  // Stop all streams
   async stopAllStreams() {
     appState.isStopStream = true;
     const streamIds = Array.from(this.streamProcesses.keys());
-    log("info", `正在停止所有流: ${streamIds.length} 个`);
+    log("info", `Stopping all streams: ${streamIds.length} streams`);
 
     streamIds.forEach(streamId => this.stopStream(streamId));
 
     // 等待所有流停止
     await new Promise(resolve => setTimeout(resolve, 500));
-    log("info", "所有流已停止");
+    log("info", "All streams stopped");
   }
 }
 
@@ -224,8 +224,8 @@ class WindowManager {
 
   // 获取全屏菜单项的正确标签
   getFullscreenLabel() {
-    console.log("当前全屏状态:", this.mainWindow.isFullScreen())
-    return this.mainWindow.isFullScreen() ? "退出全屏" : "全屏";
+    console.log("Current fullscreen status:", this.mainWindow.isFullScreen())
+    return this.mainWindow.isFullScreen() ? "Exit Fullscreen" : "Fullscreen";
   }
 
   // 更新全屏菜单项
@@ -239,7 +239,7 @@ class WindowManager {
   // 处理窗口关闭
   async handleWindowClose() {
     try {
-      log("info", "开始窗口关闭流程...");
+      log("info", "Starting window close process...");
       const streamManager = new StreamManager();
       await streamManager.stopAllStreams();
       await this.clearM3u8Folder();
@@ -252,7 +252,7 @@ class WindowManager {
 
       app.quit();
     } catch (error) {
-      log("error", `窗口关闭过程中出错: ${error.message}`);
+      log("error", `Error during window close process: ${error.message}`);
       app.quit();
     }
   }
@@ -271,10 +271,10 @@ class WindowManager {
         await fs.unlink(filePath);
       }
 
-      log("info", "m3u8 文件夹已清空");
+      log("info", "m3u8 folder cleared");
     } catch (error) {
       // 目录不存在或其他错误
-      log("info", "m3u8 文件夹不需要清空");
+      log("info", "m3u8 folder does not need to be cleared");
     }
   }
 }
@@ -311,11 +311,11 @@ class AppInitializer {
     try {
       await fs.access(ffmpegPath);
       ffmpeg.setFfmpegPath(ffmpegPath);
-      log("info", `设置FFmpeg路径成功: ${ffmpegPath}`);
+      log("info", `FFmpeg path set successfully: ${ffmpegPath}`);
       return ffmpegPath;
     } catch (err) {
-      log("error", `设置FFmpeg路径出错: ${err.message}`);
-      throw new Error(`找不到FFmpeg: ${ffmpegPath}`);
+      log("error", `Error setting FFmpeg path: ${err.message}`);
+      throw new Error(`FFmpeg not found: ${ffmpegPath}`);
     }
   }
 
@@ -326,14 +326,14 @@ class AppInitializer {
 
     if (!gotTheLock) {
       app.quit();
-      throw new Error("应用已在运行");
+      throw new Error("Application is already running");
     } else {
       app.on(
           "second-instance",
           (event, commandLine, workingDirectory, additionalData) => {
             log(
                 "info",
-                `从第二个实例接收到的数据: ${JSON.stringify(additionalData)}`,
+                `Data received from second instance: ${JSON.stringify(additionalData)}`,
             );
 
             if (this.windowManager.mainWindow) {
@@ -350,9 +350,9 @@ class AppInitializer {
   async initServer() {
     try {
       await initServer();
-      log("info", "服务器初始化成功");
+      log("info", "Server initialization successful");
     } catch (error) {
-      log("error", `服务器初始化失败: ${error.message}`);
+      log("error", `Server initialization failed: ${error.message}`);
       throw error;
     }
   }
@@ -373,14 +373,14 @@ class AppInitializer {
           await this.initServer();
           await this.windowManager.createMainWindow();
           this.setupIpcHandlers();
-          log("info", "应用初始化成功");
+          log("info", "Application initialization successful");
         } catch (error) {
-          log("error", `应用初始化出错: ${error.message}`);
+          log("error", `Application initialization error: ${error.message}`);
           app.quit();
         }
       });
     } catch (error) {
-      log("error", `应用初始化出错: ${error.message}`);
+      log("error", `Application initialization error: ${error.message}`);
       app.quit();
     }
   }
@@ -417,7 +417,7 @@ process.on("SIGINT", async () => {
     const windowManager = new WindowManager();
     await windowManager.clearM3u8Folder();
   } catch (error) {
-    log("error", `程序退出清理失败: ${error.message}`);
+    log("error", `Program exit cleanup failed: ${error.message}`);
   } finally {
     process.exit();
   }
@@ -430,7 +430,7 @@ process.on("SIGTERM", async () => {
     const windowManager = new WindowManager();
     await windowManager.clearM3u8Folder();
   } catch (error) {
-    log("error", `程序退出清理失败: ${error.message}`);
+    log("error", `Program exit cleanup failed: ${error.message}`);
   } finally {
     process.exit();
   }
@@ -443,7 +443,7 @@ app.on("window-all-closed", async () => {
       await streamManager.stopAllStreams();
       app.quit();
     } catch (error) {
-      log("error", `关闭所有窗口时出错: ${error.message}`);
+      log("error", `Error closing all windows: ${error.message}`);
       app.quit();
     }
   }
