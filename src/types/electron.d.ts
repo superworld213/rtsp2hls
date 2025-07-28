@@ -1,7 +1,6 @@
 export interface FFmpegConfig {
   id: string;
   rtspUrl: string;
-  outputDir: string;
   options?: {
     videoCodec?: string;
     audioCodec?: string;
@@ -44,11 +43,15 @@ export interface FFmpegError {
   timestamp: string;
 }
 
+export interface HlsUrl {
+  hlsUrl: string;
+}
+
 export interface ElectronAPI {
-  startFFmpegStream: (config: FFmpegConfig) => Promise<{ success: boolean; outputPath?: string; error?: string }>;
+  startFFmpegStream: (config: FFmpegConfig) => Promise<{ success: boolean; hlsUrl?:string; error?: string }>;
   stopFFmpegStream: (id: string) => Promise<{ success: boolean }>;
   getFFmpegStatus: (id: string) => Promise<FFmpegStatus>;
-  getAllFFmpegStatus: () => Promise<Record<string, FFmpegStatus>>;
+  getAllFFmpegStatus: () => Promise<StreamStatus[]>;
   checkFileExists: (filePath: string) => Promise<boolean>;
   createDirectory: (dirPath: string) => Promise<{ success: boolean; error?: string }>;
   getSystemInfo: () => Promise<SystemInfo>;

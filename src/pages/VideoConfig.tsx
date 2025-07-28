@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Table, Button, Modal, Form, Input, Select, Switch, Space, Popconfirm, Tag, message } from 'antd';
+import type { ColumnsType } from 'antd/es/table';
 import { PlusOutlined, EditOutlined, DeleteOutlined, PlayCircleOutlined, StopOutlined } from '@ant-design/icons';
 import { useStreamStore } from '../store/useStreamStore';
 import FFmpegStatus from '../components/FFmpegStatus';
@@ -23,7 +24,6 @@ const VideoConfig: React.FC = () => {
   const {
     streams,
     streamStatuses,
-    settings,
     addStream,
     updateStream,
     deleteStream,
@@ -43,9 +43,10 @@ const VideoConfig: React.FC = () => {
       if (window.electronAPI) {
         try {
           const allStatuses = await window.electronAPI.getAllFFmpegStatus();
-          Object.entries(allStatuses).forEach(([id, status]) => {
-            updateStreamStatus(id, {
-              status: status.running ? 'running' : 'stopped'
+          allStatuses.forEach(status => {
+            updateStreamStatus(status.id, {
+              status: status.running ? 'running' : 'stopped',
+              outputPath: status.url
             });
           });
         } catch (error) {
@@ -98,51 +99,32 @@ const VideoConfig: React.FC = () => {
     updateStreamStatus(stream.id, { status: 'starting' });
 
     try {
-      // 确保输出目录存在
-      await window.electronAPI.createDirectory(settings.outputDirectory);
-
       const config = {
         id: stream.id,
         rtspUrl: stream.rtspUrl,
-        outputDir: settings.outputDirectory,
-        options: {
-          resolution: stream.resolution === 'original' ? undefined : stream.resolution,
-          bitrate: stream.bitrate,
-          hlsTime: settings.hlsSegmentDuration.toString(),
-          hlsListSize: settings.hlsPlaylistSize.toString()
-        }
+        resolution: stream.resolution,
+        bitrate: stream.bitrate,
+        frameRate: stream.frameRate,
+        audioEnabled: stream.audioEnabled
       };
 
-      const result = await window.electronAPI.startFFmpegStream(config);
-      
-      if (result.success) {
+      try {
+        const result = await window.electronAPI.startFFmpegStream(config);
+        const hlsUrl = result.hlsUrl;
         updateStreamStatus(stream.id, {
           status: 'running',
-          outputPath: result.outputPath,
-          startTime: new Date()
+          outputPath: hlsUrl,
+          startTime: new Date(),
         });
         message.success(`视频流 "${stream.name}" 启动成功`);
-      } else {
-        // 等待一下让FFmpeg进程有时间生成错误信息
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        // 获取详细的FFmpeg错误信息
-        const ffmpegError = await window.electronAPI.getFFmpegError(stream.id);
-        
-        let errorMessage = result.error || '启动失败';
-        if (ffmpegError) {
-          errorMessage = ffmpegError.message;
-          // 清除错误信息
-          await window.electronAPI.clearFFmpegError(stream.id);
-        }
-        
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
         updateStreamStatus(stream.id, {
           status: 'error',
-          error: errorMessage
+          error: errorMessage,
         });
-        
         message.error({
-          content: errorMessage,
+          content: `启动失败: ${errorMessage}`,
           duration: 10,
         });
       }
@@ -172,10 +154,10 @@ const VideoConfig: React.FC = () => {
         updateStreamStatus(streamId, { status: 'stopped' });
         message.success('视频流已停止');
       } else {
-        message.error('停止失败');
+        message.error('停止失败:'+result);
       }
     } catch (error) {
-      message.error('停止失败');
+      message.error('停止失败:'+error);
     } finally {
       setLoading(prev => ({ ...prev, [streamId]: false }));
     }
@@ -186,10 +168,14 @@ const VideoConfig: React.FC = () => {
       const values = await form.validateFields();
       
       if (editingStream) {
-        updateStream(editingStream.id, values);
+        updateStream(editingStream.id, {
+          ...editingStream,
+          ...values,
+          updatedAt: new Date(),
+        });
         message.success('更新成功');
       } else {
-        addStream({ ...values, status: 'stopped' as const });
+        addStream(values);
         message.success('添加成功');
       }
       
@@ -217,7 +203,7 @@ const VideoConfig: React.FC = () => {
     return <Tag color={config.color}>{config.text}</Tag>;
   };
 
-  const columns = [
+  const columns: ColumnsType<StreamConfig> = [
     {
       title: '名称',
       dataIndex: 'name',
@@ -248,20 +234,20 @@ const VideoConfig: React.FC = () => {
       dataIndex: 'frameRate',
       key: 'frameRate',
       width: 80,
-      render: (frameRate: number) => `${frameRate} FPS`
+      render: (text) => `${text} FPS`
     },
     {
       title: '音频',
       dataIndex: 'audioEnabled',
       key: 'audioEnabled',
       width: 80,
-      render: (enabled: boolean) => enabled ? '启用' : '禁用'
+      render: (text) => (text ? '启用' : '禁用')
     },
     {
       title: '状态',
       key: 'status',
       width: 100,
-      render: (_: any, record: StreamConfig) => {
+      render: (_, record) => {
         const status = streamStatuses[record.id];
         return getStatusTag(status?.status || 'stopped');
       }
@@ -271,16 +257,16 @@ const VideoConfig: React.FC = () => {
       key: 'videoUrl',
       width: 250,
       ellipsis: true,
-      render: (_: any, record: StreamConfig) => {
+      render: (_, record) => {
         const status = streamStatuses[record.id];
         const isRunning = status?.status === 'running';
-        
-        if (isRunning) {
-          const videoUrl = `http://localhost:8080/hls/${record.id}.m3u8`;
+
+        if (isRunning && status?.outputPath) {
+          const videoUrl = status.outputPath;
           return (
-            <a 
-              href={videoUrl} 
-              target="_blank" 
+            <a
+              href={videoUrl}
+              target="_blank"
               rel="noopener noreferrer"
               className="text-blue-600 hover:text-blue-800"
             >
@@ -294,8 +280,9 @@ const VideoConfig: React.FC = () => {
     {
       title: '操作',
       key: 'actions',
-      width: 200,
-      render: (_: any, record: StreamConfig) => {
+      fixed: 'right' as const,
+      width: 220,
+      render: (_, record) => {
         const status = streamStatuses[record.id];
         const isRunning = status?.status === 'running';
         const isLoading = loading[record.id];
@@ -377,6 +364,7 @@ const VideoConfig: React.FC = () => {
           columns={columns}
           dataSource={streams}
           rowKey="id"
+          scroll={{ x: 'max-content' }}
           pagination={{
             pageSize: 10,
             showSizeChanger: true,

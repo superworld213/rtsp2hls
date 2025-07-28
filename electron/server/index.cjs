@@ -1,18 +1,15 @@
-const { join, dirname } = require("path");
-const { fileURLToPath } = require("url");
+const { join } = require("path");
 const { readFile, stat, access } = require("fs/promises");
 const { constants } = require("fs");
-const os = require("os");
 const path = require("path");
+const { log } = require("../utils/tools.cjs");
+const os = require('os');
 
-// 获取应用数据目录
+// 静态文件根目录
 function getAppDataPath() {
   const homeDir = os.homedir();
-  return join(homeDir, "AppData", "Roaming", "smart-granary");
+  return join(homeDir, "AppData", "Roaming", "rtsp2hls","m3u8");
 }
-
-// 静态文件根目录 - 使用应用数据目录
-const STATIC_ROOT = getAppDataPath();
 
 module.exports = {
   initServer: async () => {
@@ -25,10 +22,11 @@ module.exports = {
         let filePath = req.url === "/" ? "/index.html" : req.url;
 
         // 构建绝对路径，防止路径遍历攻击
-        const absolutePath = join(STATIC_ROOT, filePath);
+        const absolutePath = join(getAppDataPath(), filePath);
+        log("info", `请求路径: ${absolutePath}`);
 
         // 验证请求的路径是否在静态文件根目录内
-        if (!absolutePath.startsWith(STATIC_ROOT)) {
+        if (!absolutePath.startsWith(getAppDataPath())) {
           res.statusCode = 403;
           return res.end("Forbidden");
         }
@@ -60,7 +58,7 @@ module.exports = {
     });
 
     // 辅助函数：提供文件服务
-    async function serveFile(filePath, res) {
+    async function serveFile (filePath, res) {
       try {
         // 获取文件扩展名以确定 MIME 类型
         const extname = path.extname(filePath);
@@ -109,8 +107,8 @@ module.exports = {
     // 启动服务器
     const PORT = process.env.PORT || 8080;
     server.listen(PORT, () => {
-      console.log(`Server running at http://localhost:${PORT}`);
-    console.log(`Static files root directory: ${STATIC_ROOT}`);
+      log("info", `Server running at http://localhost:${PORT}`);
+      log("info", `Static files root directory: ${getAppDataPath()}`);
     });
   },
 };

@@ -11,6 +11,7 @@ export interface StreamConfig {
   status: 'stopped' | 'starting' | 'running' | 'error';
   createdAt: Date;
   updatedAt: Date;
+  fixed?: boolean | string;
 }
 
 export interface StreamStatus {

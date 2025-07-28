@@ -11,7 +11,7 @@ interface StreamStore {
   settings: AppSettings;
   
   // 流配置操作
-  addStream: (stream: Omit<StreamConfig, 'id' | 'createdAt' | 'updatedAt'>) => void;
+  addStream: (stream: Omit<StreamConfig, 'id' | 'createdAt' | 'updatedAt' | 'status'>) => void;
   updateStream: (id: string, updates: Partial<StreamConfig>) => void;
   deleteStream: (id: string) => void;
   getStream: (id: string) => StreamConfig | undefined;
@@ -36,7 +36,7 @@ export const useStreamStore = create<StreamStore>()(
       streamStatuses: {},
       settings: DEFAULT_SETTINGS,
       
-      addStream: (streamData) => {
+      addStream: (streamData: Omit<StreamConfig, 'id' | 'createdAt' | 'updatedAt'>) => {
         const newStream: StreamConfig = {
           ...streamData,
           id: `stream_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -57,7 +57,7 @@ export const useStreamStore = create<StreamStore>()(
         }));
       },
       
-      updateStream: (id, updates) => {
+      updateStream: (id: string, updates: Partial<StreamConfig>) => {
         set((state) => ({
           streams: state.streams.map(stream => 
             stream.id === id 
@@ -69,7 +69,7 @@ export const useStreamStore = create<StreamStore>()(
       
       deleteStream: (id) => {
         set((state) => {
-          const { [id]: removed, ...remainingStatuses } = state.streamStatuses;
+          const {...remainingStatuses } = state.streamStatuses;
           return {
             streams: state.streams.filter(stream => stream.id !== id),
             streamStatuses: remainingStatuses

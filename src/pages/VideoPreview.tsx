@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Card, Select, Button, Row, Col, Statistic, Alert, Spin } from 'antd';
 import { PlayCircleOutlined, PauseCircleOutlined, FullscreenOutlined } from '@ant-design/icons';
 import { useStreamStore } from '../store/useStreamStore';
-import { StreamConfig } from '../types/stream';
 import Hls from 'hls.js';
 
 const { Option } = Select;

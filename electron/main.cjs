@@ -1,15 +1,10 @@
-const { app, BrowserWindow, ipcMain, Menu, dialog, nativeTheme } = require("electron");
+const { app, BrowserWindow, ipcMain, Menu, dialog } = require("electron");
 const fs = require("fs").promises;
 const path = require("path");
 const ffmpeg = require("fluent-ffmpeg");
 const { initServer } = require("./server/index.cjs");
-const os = require("os");
-
-// 日志工具函数，添加时间戳并区分日志级别
-const log = (level, message) => {
-  const timestamp = new Date().toISOString();
-  console.log(`[${timestamp}] [${level.toUpperCase()}] ${message}`);
-};
+const { log } = require("./utils/tools.cjs");
+const os = require('os');
 
 // 应用状态管理
 class AppState {
@@ -30,18 +25,26 @@ class StreamManager {
   }
 
   // 获取m3u8目录
-  getM3u8Dir() {
+  // getM3u8Dir () {
+  //   const dir = path.join(__dirname, '..', 'output');
+  //   log("info", `M3U8 目录是: ${dir}`);
+  //   return dir;
+  // }
+
+  getM3u8Dir () {
     return path.join(
-        os.homedir(),
-        "AppData",
-        "Roaming",
-        "smart-granary",
-        "m3u8",
+      os.homedir(),
+      "AppData",
+      "Roaming",
+      "rtsp2hls",
+      "m3u8",
     );
   }
 
   // 启动流转换
-  async startStream(rtspUrl, streamId) {
+  async startStream (config) {
+    const { rtspUrl, id, resolution, bitrate, frameRate, audioEnabled } = config;
+    log("info", `开始推流: ${rtspUrl}, ${id}`);
     appState.isStopStream = false;
 
     try {
@@ -49,107 +52,147 @@ class StreamManager {
       await this.ensureDirectoryExists(m3u8Dir);
 
       return await new Promise((resolve, reject) => {
-        const hlsPath = path.join(m3u8Dir, `./${streamId}.m3u8`);
+        const hlsPath = path.join(m3u8Dir, `./${id}.m3u8`);
+        log("info", `HLS 路径: ${hlsPath}`);
+
         const command = ffmpeg(rtspUrl)
-            .inputOptions("-rtsp_transport", "tcp")
-            .videoCodec("libx264")
-            .audioCodec("aac")
-            .outputOptions(
-                "-preset", "ultrafast",
-                "-tune", "zerolatency",
-                "-crf", "23",
-                "-g", "48",
-                "-sc_threshold", "0",
-                "-f", "hls",
-                "-hls_time", "2",
-                "-hls_list_size", "10",
-                "-hls_flags", "delete_segments",
-                "-hls_segment_type", "mpegts",
-                "-bufsize", "64k",
-                "-maxrate", "4000k",
-            )
-            .output(hlsPath)
-            .on("start", () => {
-              this.streamProcesses.set(streamId, command);
-              this.checkFileExists(hlsPath, streamId, resolve, reject);
-            })
-            .on("error", (err) => {
-              this.streamProcesses.delete(streamId);
-              reject(err.message);
-            })
-            .run();
+          .inputOptions("-rtsp_transport", "tcp")
+          .videoCodec("libx264")
+          .outputOptions(
+            "-preset", "ultrafast",
+            "-tune", "zerolatency",
+            "-crf", "23",
+            "-g", "48",
+            "-sc_threshold", "0",
+            "-f", "hls",
+            "-hls_time", "2",
+            "-hls_list_size", "10",
+            "-hls_flags", "delete_segments",
+            "-hls_segment_type", "mpegts",
+            "-bufsize", "64k",
+            "-maxrate", "4000k",
+          );
+
+        // 根据配置动态添加选项
+        if (resolution) {
+          command.size(resolution);
+        }
+        if (bitrate) {
+          command.videoBitrate(bitrate);
+        }
+        if (frameRate) {
+          command.fps(frameRate);
+        }
+        if (audioEnabled) {
+          command.audioCodec('aac');
+        } else {
+          command.noAudio();
+        }
+
+        command.output(hlsPath)
+          .on("start", () => {
+            this.streamProcesses.set(id, command);
+            this.checkFileExists(hlsPath, id, resolve, reject);
+          })
+          .on("error", (err) => {
+            this.streamProcesses.delete(id);
+            log("error", `FFmpeg 错误: ${err}`);
+            reject(err);
+          })
+          .run();
       });
     } catch (error) {
-      log("error", `Failed to start stream: ${error.message}`);
+      log("error", `启动推流失败: ${error}`);
       throw error;
     }
   }
 
   // 确保目录存在
-  async ensureDirectoryExists(dirPath) {
+  async ensureDirectoryExists (dirPath) {
     try {
       await fs.access(dirPath);
-    } catch {
-      await fs.mkdir(dirPath, { recursive: true });
-      log("info", `Directory created successfully: ${dirPath}`);
+      log("info", `目录已存在: ${dirPath}`);
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        log("info", `目录不存在，正在创建: ${dirPath}`);
+        try {
+          await fs.mkdir(dirPath, { recursive: true });
+          log("info", `目录创建成功: ${dirPath}`);
+        } catch (mkdirError) {
+          log("error", `创建目录失败: ${mkdirError.message}`);
+          throw mkdirError;
+        }
+      } else {
+        log("error", `访问目录失败: ${error.message}`);
+        throw error;
+      }
     }
   }
 
   // 检查文件是否存在，存在则返回相关信息
-  checkFileExists(filePath, streamId, resolve, reject) {
+  checkFileExists (filePath, streamId, resolve, reject, timeout = 0) {
     if (appState.isStopStream) {
-      reject("Stream stopped");
+      reject("推流已停止");
       return;
     }
 
+    timeout += 1000
     fs.stat(filePath)
-        .then((stats) => {
-          if (stats.isFile()) {
-            resolve({
-              streamId,
-              hlsUrl: `http://localhost:8080/m3u8/${streamId}.m3u8`,
-            });
-          } else {
-            setTimeout(() => this.checkFileExists(filePath, streamId, resolve, reject), 100);
+      .then((stats) => {
+        if (stats.isFile()) {
+          resolve({
+            streamId,
+            hlsUrl: `http://localhost:8080/${streamId}.m3u8`,
+          });
+        } else {
+          if (timeout > 30000) {
+            reject("30秒后未找到文件");
+            return;
           }
-        })
-        .catch((error) => {
-          if (error.code === "ENOENT") {
-            setTimeout(() => this.checkFileExists(filePath, streamId, resolve, reject), 100);
-            log("info", "File does not exist yet, continuing to check...");
-          } else {
-            log("error", `Error checking file: ${error.message}`);
-            reject(error.message);
+          setTimeout(() => this.checkFileExists(filePath, streamId, resolve, reject, timeout), 1000);
+        }
+      })
+      .catch((error) => {
+        if (error.code === "ENOENT") {
+          if (timeout > 30000) {
+            reject("File not found after 30 seconds");
+            return;
           }
-        });
+          setTimeout(() => this.checkFileExists(filePath, streamId, resolve, reject, timeout), 1000);
+          log("info", "文件尚不存在，继续检查...");
+        } else {
+          log("error", `检查文件时出错: ${error.message}`);
+          reject(error.message);
+        }
+      });
   }
 
   // 停止单个流
-  stopStream(streamId) {
+  stopStream (streamId) {
     const process = this.streamProcesses.get(streamId);
     if (process) {
       try {
-        log("info", `Stopping stream: ${streamId}`);
+        log("info", `正在停止推流: ${streamId}`);
         process.kill();
         this.streamProcesses.delete(streamId);
       } catch (e) {
-        log("error", `Error stopping stream ${streamId}: ${e}`);
-        dialog.showErrorBox("Stream Stop Error", e.message);
+        log("error", `停止推流 ${streamId} 时出错: ${e}`);
+        dialog.showErrorBox("停止推流错误", e.message);
       }
     }
   }
 
   // 停止所有流
-  async stopAllStreams() {
+  async stopAllStreams () {
     appState.isStopStream = true;
     const streamIds = Array.from(this.streamProcesses.keys());
-    log("info", `Stopping all streams: ${streamIds.length} streams`);
+    log("info", `正在停止所有推流: ${streamIds.length} 个推流`);
 
     streamIds.forEach(streamId => this.stopStream(streamId));
 
     // 等待所有流停止
     await new Promise(resolve => setTimeout(resolve, 500));
-    log("info", "All streams stopped");
+    log("info", "所有推流已停止");
   }
 }
 
@@ -161,7 +204,7 @@ class WindowManager {
   }
 
   // 创建主窗口
-  async createMainWindow() {
+  async createMainWindow () {
     this.mainWindow = new BrowserWindow({
       width: 1920,
       height: 1080,
@@ -171,6 +214,9 @@ class WindowManager {
         nodeIntegration: true,
         enableRemoteModule: true,
         backgroundThrottling: false,
+        webSecurity: false, // 关闭同源策略
+        allowRunningInsecureContent: true, // 允许加载不安全的内容（如 HTTP）
+        experimentalFeatures: true // 启用实验特性（可选）
       },
     });
 
@@ -178,12 +224,12 @@ class WindowManager {
     Menu.setApplicationMenu(null);
 
     const isProduction = app.isPackaged;
-     if (isProduction) {
-       await this.mainWindow.loadFile("../dist/index.html");
-     } else {
-       await this.mainWindow.loadURL("http://localhost:5174");
-       this.mainWindow.webContents.openDevTools();
-     }
+    if (isProduction) {
+      await this.mainWindow.loadFile("../dist/index.html");
+    } else {
+      await this.mainWindow.loadURL("http://localhost:5173");
+      this.mainWindow.webContents.openDevTools();
+    }
 
     this.setupContextMenu();
 
@@ -199,7 +245,7 @@ class WindowManager {
   }
 
   // 设置右键菜单
-  setupContextMenu() {
+  setupContextMenu () {
     // 创建右键菜单
     this.contextMenu = Menu.buildFromTemplate([
       {
@@ -223,13 +269,13 @@ class WindowManager {
   }
 
   // 获取全屏菜单项的正确标签
-  getFullscreenLabel() {
-    console.log("Current fullscreen status:", this.mainWindow.isFullScreen())
-    return this.mainWindow.isFullScreen() ? "Exit Fullscreen" : "Fullscreen";
+  getFullscreenLabel () {
+    console.log("当前全屏状态:", this.mainWindow.isFullScreen())
+    return this.mainWindow.isFullScreen() ? "退出全屏" : "全屏";
   }
 
   // 更新全屏菜单项
-  updateFullscreenMenuItem() {
+  updateFullscreenMenuItem () {
     console.log(this.contextMenu)
     if (this.contextMenu && this.contextMenu.items[0]) {
       this.contextMenu.items[0].label = this.getFullscreenLabel();
@@ -237,9 +283,9 @@ class WindowManager {
   }
 
   // 处理窗口关闭
-  async handleWindowClose() {
+  async handleWindowClose () {
     try {
-      log("info", "Starting window close process...");
+      log("info", "开始关闭窗口进程...");
       const streamManager = new StreamManager();
       await streamManager.stopAllStreams();
       await this.clearM3u8Folder();
@@ -252,13 +298,13 @@ class WindowManager {
 
       app.quit();
     } catch (error) {
-      log("error", `Error during window close process: ${error.message}`);
+      log("error", `关闭窗口进程时出错: ${error.message}`);
       app.quit();
     }
   }
 
   // 清空m3u8文件夹
-  async clearM3u8Folder() {
+  async clearM3u8Folder () {
     const streamManager = new StreamManager();
     const m3u8Dir = streamManager.getM3u8Dir();
 
@@ -271,10 +317,10 @@ class WindowManager {
         await fs.unlink(filePath);
       }
 
-      log("info", "m3u8 folder cleared");
+      log("info", "m3u8 文件夹已清除");
     } catch (error) {
       // 目录不存在或其他错误
-      log("info", "m3u8 folder does not need to be cleared");
+      log("info", "m3u8 文件夹无需清除");
     }
   }
 }
@@ -287,112 +333,114 @@ class AppInitializer {
   }
 
   // 设置FFmpeg路径
-  async setFFmpegPath() {
+  async setFFmpegPath () {
     let ffmpegPath;
 
     if (app.isPackaged) {
       ffmpegPath = path.join(
-          process.resourcesPath,
-          "app",
-          "electron",
-          "ffmpeg",
-          "bin",
-          process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg",
+        process.resourcesPath,
+        "app",
+        "electron",
+        "ffmpeg",
+        "bin",
+        process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg",
       );
     } else {
       ffmpegPath = path.join(
-          "ffmpeg",
-          "bin",
-          process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg",
+        "ffmpeg",
+        "bin",
+        process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg",
       );
     }
 
     try {
       await fs.access(ffmpegPath);
       ffmpeg.setFfmpegPath(ffmpegPath);
-      log("info", `FFmpeg path set successfully: ${ffmpegPath}`);
+      log("info", `FFmpeg 路径设置成功: ${ffmpegPath}`);
       return ffmpegPath;
     } catch (err) {
-      log("error", `Error setting FFmpeg path: ${err.message}`);
-      throw new Error(`FFmpeg not found: ${ffmpegPath}`);
+      log("error", `设置 FFmpeg 路径时出错: ${err.message}`);
+      throw new Error(`未找到 FFmpeg: ${ffmpegPath}`);
     }
   }
 
   // 处理单实例逻辑
-  async setTheLock() {
+  setTheLock () {
     const additionalData = { myKey: "myValue" };
     const gotTheLock = app.requestSingleInstanceLock(additionalData);
 
     if (!gotTheLock) {
+      log("info", "应用程序已在运行。正在退出。");
       app.quit();
-      throw new Error("Application is already running");
-    } else {
-      app.on(
-          "second-instance",
-          (event, commandLine, workingDirectory, additionalData) => {
-            log(
-                "info",
-                `Data received from second instance: ${JSON.stringify(additionalData)}`,
-            );
-
-            if (this.windowManager.mainWindow) {
-              if (this.windowManager.mainWindow.isMinimized())
-                this.windowManager.mainWindow.restore();
-              this.windowManager.mainWindow.focus();
-            }
-          },
-      );
+      return false;
     }
+
+    app.on(
+      "second-instance",
+      (event, commandLine, workingDirectory, additionalData) => {
+        log(
+          "info",
+          `从第二个实例接收到数据: ${JSON.stringify(additionalData)}`,
+        );
+
+        if (this.windowManager.mainWindow) {
+          if (this.windowManager.mainWindow.isMinimized())
+            this.windowManager.mainWindow.restore();
+          this.windowManager.mainWindow.focus();
+        }
+      },
+    );
+
+    return true;
   }
 
   // 初始化服务器
-  async initServer() {
+  async initServer () {
     try {
       await initServer();
-      log("info", "Server initialization successful");
+      log("info", "服务器初始化成功");
     } catch (error) {
-      log("error", `Server initialization failed: ${error.message}`);
+      log("error", `服务器初始化失败: ${error.message}`);
       throw error;
     }
   }
 
   // 初始化应用
-  async init() {
+  async init () {
+    if (!this.setTheLock()) {
+      return;
+    }
+
     try {
-      await this.setTheLock();
       await this.setFFmpegPath();
 
       // 确保m3u8目录存在
       const streamManager = new StreamManager();
       await streamManager.ensureDirectoryExists(streamManager.getM3u8Dir());
 
-      // 启动服务器并创建窗口
-      app.whenReady().then(async () => {
-        try {
-          await this.initServer();
-          await this.windowManager.createMainWindow();
-          this.setupIpcHandlers();
-          log("info", "Application initialization successful");
-        } catch (error) {
-          log("error", `Application initialization error: ${error.message}`);
-          app.quit();
-        }
-      });
+      // 等待应用准备就绪
+      await app.whenReady();
+
+      // 初始化服务器和窗口
+      await this.initServer();
+      await this.windowManager.createMainWindow();
+      this.setupIpcHandlers();
+      log("info", "应用程序初始化成功");
     } catch (error) {
-      log("error", `Application initialization error: ${error.message}`);
+      log("error", `应用程序初始化错误: ${error.message}`);
       app.quit();
     }
   }
 
   // 设置IPC通信处理函数
-  setupIpcHandlers() {
+  setupIpcHandlers () {
     // 流管理相关
-    ipcMain.handle("start-stream", async (event, { rtspUrl, streamId }) => {
-      return this.streamManager.startStream(rtspUrl, streamId);
+    ipcMain.handle("start-stream", async (event, { rtspUrl, id }) => {
+      return this.streamManager.startStream(rtspUrl, id);
     });
 
-    ipcMain.handle("stop-stream", (event, streamId) => {
-      this.streamManager.stopStream(streamId);
+    ipcMain.handle("stop-stream", (event, id) => {
+      this.streamManager.stopStream(id);
     });
 
     ipcMain.handle("stop-all-stream", async () => {
@@ -401,11 +449,18 @@ class AppInitializer {
 
     // FFmpeg 流管理
     ipcMain.handle("start-ffmpeg-stream", async (event, config) => {
-      return this.streamManager.startStream(config.rtspUrl, config.streamId);
+      try {
+        const result = await this.streamManager.startStream(config);
+        return { success: true, ...result };
+      } catch (error) {
+        log("error", `启动 FFmpeg 流失败: ${error.message}`);
+        return Promise.reject(new Error(error.message));
+      }
     });
 
     ipcMain.handle("stop-ffmpeg-stream", (event, id) => {
       this.streamManager.stopStream(id);
+      return { success: true };
     });
 
     ipcMain.handle("get-ffmpeg-status", (event, id) => {
@@ -413,7 +468,7 @@ class AppInitializer {
       return {
         id,
         running: !!process,
-        url: process ? `http://localhost:8080/m3u8/${id}.m3u8` : null
+        url: process ? `http://localhost:8080/${id}.m3u8` : null
       };
     });
 
@@ -423,7 +478,7 @@ class AppInitializer {
         statuses.push({
           id,
           running: !!process,
-          url: `http://localhost:8080/m3u8/${id}.m3u8`
+          url: `http://localhost:8080/${id}.m3u8`
         });
       }
       return statuses;
@@ -499,14 +554,14 @@ class AppInitializer {
     // 流URL获取
     ipcMain.handle("get-stream-url", async (event, streamId) => {
       return {
-        url: `http://localhost:8080/m3u8/${streamId}.m3u8`,
+        url: `http://localhost:8080/${streamId}.m3u8`,
         baseUrl: "http://localhost:8080"
       };
     });
   }
 
   // 检查FFmpeg是否可用
-  checkFFmpegAvailability() {
+  checkFFmpegAvailability () {
     const { execSync } = require('child_process');
     try {
       const ffmpegPath = path.join(
@@ -514,20 +569,20 @@ class AppInitializer {
         "bin",
         process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg"
       );
-      
+
       // 首先检查本地FFmpeg文件是否存在
       if (require('fs').existsSync(ffmpegPath)) {
         execSync(`"${ffmpegPath}" -version`, { stdio: 'ignore' });
         return { available: true, usingLocal: true, path: ffmpegPath };
       }
-      
+
       // 如果本地FFmpeg不存在，尝试系统PATH中的FFmpeg
       execSync('ffmpeg -version', { stdio: 'ignore' });
       return { available: true, usingLocal: false, path: 'ffmpeg' };
     } catch (error) {
-      return { 
-        available: false, 
-        error: 'FFmpeg not found. Please ensure FFmpeg is in the project\'s ffmpeg/bin directory or installed in system PATH.'
+      return {
+        available: false,
+        error: '未找到 FFmpeg。请确保 FFmpeg 位于项目的 ffmpeg/bin 目录中或已安装在系统 PATH 中。'
       };
     }
   }
@@ -545,7 +600,7 @@ process.on("SIGINT", async () => {
     const windowManager = new WindowManager();
     await windowManager.clearM3u8Folder();
   } catch (error) {
-    log("error", `Program exit cleanup failed: ${error.message}`);
+    log("error", `程序退出清理失败: ${error.message}`);
   } finally {
     process.exit();
   }
@@ -571,7 +626,7 @@ app.on("window-all-closed", async () => {
       await streamManager.stopAllStreams();
       app.quit();
     } catch (error) {
-      log("error", `Error closing all windows: ${error.message}`);
+      log("error", `关闭所有窗口时出错: ${error.message}`);
       app.quit();
     }
   }

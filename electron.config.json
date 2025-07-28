@@ -3,7 +3,9 @@
     "dist/**/*",
     "electron/**/*",
     "package.json",
-    "ffmpeg/**/*"
+    "ffmpeg/**/*",
+    "node_modules/**/*",
+    "!node_modules/**/*.map"
   ],
   "extraMetadata": {
     "debug": true
