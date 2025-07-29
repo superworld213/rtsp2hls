@@ -5,6 +5,13 @@ const ffmpeg = require("fluent-ffmpeg");
 const { initServer } = require("./server/index.cjs");
 const { log } = require("./utils/tools.cjs");
 const os = require('os');
+const eLog = require("electron-log");
+
+// 配置文件日志路径
+eLog.transports.file.resolvePathFn = () => path.join(app.getPath('userData'), 'logs', 'main.log');
+
+// 替换console
+Object.assign(console, log.functions);
 
 // 应用状态管理
 class AppState {
@@ -23,13 +30,6 @@ class StreamManager {
   constructor() {
     this.streamProcesses = appState.streamProcesses;
   }
-
-  // 获取m3u8目录
-  // getM3u8Dir () {
-  //   const dir = path.join(__dirname, '..', 'output');
-  //   log("info", `M3U8 目录是: ${dir}`);
-  //   return dir;
-  // }
 
   getM3u8Dir () {
     return path.join(
@@ -96,8 +96,12 @@ class StreamManager {
           })
           .on("error", (err) => {
             this.streamProcesses.delete(id);
-            log("error", `FFmpeg 错误: ${err}`);
-            reject(err);
+            log("error", `FFmpeg 错误: ${err.message}`);
+            // 发送状态更新到渲染进程
+            if (appState.mainWindow) {
+              appState.mainWindow.webContents.send('stream-status-changed', { id, status: 'failed', error: err.message });
+            }
+            reject(new Error(err.message));
           })
           .run();
       });
@@ -173,10 +177,14 @@ class StreamManager {
     if (process) {
       try {
         log("info", `正在停止推流: ${streamId}`);
-        process.kill();
+        process.kill('SIGKILL'); // 强制终止进程
         this.streamProcesses.delete(streamId);
+        log("info", `推流 ${streamId} 已成功停止`);
+        if (appState.mainWindow) {
+          appState.mainWindow.webContents.send('stream-status-changed', { id: streamId, status: 'stopped' });
+        }
       } catch (e) {
-        log("error", `停止推流 ${streamId} 时出错: ${e}`);
+        log("error", `停止推流 ${streamId} 时出错: ${e.message}`);
         dialog.showErrorBox("停止推流错误", e.message);
       }
     }
@@ -205,11 +213,13 @@ class WindowManager {
 
   // 创建主窗口
   async createMainWindow () {
+    const isProduction = app.isPackaged;
+    const preload = path.join(__dirname, "preload.cjs");
     this.mainWindow = new BrowserWindow({
       width: 1920,
       height: 1080,
       webPreferences: {
-        preload: path.join(__dirname, "preload.cjs"),
+        preload,
         contextIsolation: true,
         nodeIntegration: true,
         enableRemoteModule: true,
@@ -223,9 +233,8 @@ class WindowManager {
     appState.mainWindow = this.mainWindow;
     Menu.setApplicationMenu(null);
 
-    const isProduction = app.isPackaged;
     if (isProduction) {
-      await this.mainWindow.loadFile("../dist/index.html");
+      await this.mainWindow.loadFile(path.join(app.getAppPath(), "dist/index.html"));
     } else {
       await this.mainWindow.loadURL("http://localhost:5173");
       this.mainWindow.webContents.openDevTools();
@@ -332,27 +341,32 @@ class AppInitializer {
     this.windowManager = new WindowManager();
   }
 
-  // 设置FFmpeg路径
-  async setFFmpegPath () {
-    let ffmpegPath;
-
-    if (app.isPackaged) {
-      ffmpegPath = path.join(
-        process.resourcesPath,
-        "app",
-        "electron",
+  // 获取 FFmpeg 路径
+  _getFFmpegPath () {
+    const isProduction = app.isPackaged;
+    if (isProduction) {
+      return path.join(
+        app.getAppPath(),
+        "..",
+        "app.asar.unpacked",
         "ffmpeg",
         "bin",
-        process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg",
+        process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg"
       );
     } else {
-      ffmpegPath = path.join(
+      return path.join(
+        __dirname,
+        "..",
         "ffmpeg",
         "bin",
-        process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg",
+        process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg"
       );
     }
+  }
 
+  // 设置FFmpeg路径
+  async setFFmpegPath () {
+    const ffmpegPath = this._getFFmpegPath();
     try {
       await fs.access(ffmpegPath);
       ffmpeg.setFfmpegPath(ffmpegPath);
@@ -420,12 +434,18 @@ class AppInitializer {
 
       // 等待应用准备就绪
       await app.whenReady();
+      app.whenReady().then(async () => {
+        try {
+          await this.initServer();
+          await this.windowManager.createMainWindow();
+          this.setupIpcHandlers();
+          log("info", "应用初始化成功");
+        } catch (error) {
+          log("error", `应用初始化出错: ${error.message}`);
+          app.quit();
+        }
+      });
 
-      // 初始化服务器和窗口
-      await this.initServer();
-      await this.windowManager.createMainWindow();
-      this.setupIpcHandlers();
-      log("info", "应用程序初始化成功");
     } catch (error) {
       log("error", `应用程序初始化错误: ${error.message}`);
       app.quit();
@@ -524,6 +544,7 @@ class AppInitializer {
 
     // FFmpeg检查
     ipcMain.handle("check-ffmpeg", async () => {
+      log("info", "检查FFmpeg");
       return this.checkFFmpegAvailability();
     });
 
@@ -563,13 +584,8 @@ class AppInitializer {
   // 检查FFmpeg是否可用
   checkFFmpegAvailability () {
     const { execSync } = require('child_process');
+    const ffmpegPath = this._getFFmpegPath();
     try {
-      const ffmpegPath = path.join(
-        "ffmpeg",
-        "bin",
-        process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg"
-      );
-
       // 首先检查本地FFmpeg文件是否存在
       if (require('fs').existsSync(ffmpegPath)) {
         execSync(`"${ffmpegPath}" -version`, { stdio: 'ignore' });

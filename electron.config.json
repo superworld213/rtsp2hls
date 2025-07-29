@@ -10,11 +10,11 @@
   "extraMetadata": {
     "debug": true
   },
-  "productName": "RTSP2HLS",
-  "extraFiles": [],
-  "directories": {
-    "output": "./builder"
-  },
+  "appId": "com.rtsp2hls.app",
+    "productName": "RTSP2HLS",
+    "directories": {
+      "output": "builder"
+    },
   "win": {
     "target": "nsis"
   },
@@ -26,6 +26,9 @@
     "shortcutName": "RTSP2HLS",
     "perMachine": true
   },
-  "asar": false,
-  "asarUnpack": "**/*.node"
+  "asar": true,
+  "asarUnpack": [
+    "**/*.node",
+    "ffmpeg/**/*"
+  ]
 }

@@ -52,11 +52,7 @@ const LocalSettings: React.FC = () => {
     message.success('设置已重置为默认值');
   };
 
-  const handleSelectOutputDirectory = async () => {
-    // 这里可以集成文件选择对话框
-    // 由于Electron的限制，这里暂时使用输入框
-    message.info('请在输入框中手动输入输出目录路径');
-  };
+
 
   const formatBytes = (bytes: number): string => {
     if (bytes === 0) return '0 Bytes';
@@ -86,22 +82,6 @@ const LocalSettings: React.FC = () => {
               layout="vertical"
               onFinish={handleSave}
             >
-              <Form.Item
-                name="outputDirectory"
-                label="输出目录"
-                rules={[{ required: true, message: '请输入输出目录路径' }]}
-              >
-                <Input
-                  placeholder="请输入HLS文件输出目录"
-                  addonAfter={
-                    <Button
-                      type="text"
-                      icon={<FolderOpenOutlined />}
-                      onClick={handleSelectOutputDirectory}
-                    />
-                  }
-                />
-              </Form.Item>
 
               <Form.Item
                 name="logLevel"

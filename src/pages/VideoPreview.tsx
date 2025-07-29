@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Card, Select, Button, Row, Col, Statistic, Alert, Spin } from 'antd';
+import { Card, List, Button, Row, Col, Statistic, Alert, Spin } from 'antd';
 import { PlayCircleOutlined, PauseCircleOutlined, FullscreenOutlined } from '@ant-design/icons';
 import { useStreamStore } from '../store/useStreamStore';
 import Hls from 'hls.js';
 
-const { Option } = Select;
+
 
 const VideoPreview: React.FC = () => {
   const { streams, streamStatuses, getStreamStatus } = useStreamStore();
@@ -35,10 +35,7 @@ const VideoPreview: React.FC = () => {
     }
   }, [streams, streamStatuses, selectedStreamId]);
 
-  const handleStreamSelect = (streamId: string) => {
-    setSelectedStreamId(streamId);
-    setIsPlaying(false);
-  };
+
 
   const handlePlay = async () => {
     if (!selectedStreamId) return;
@@ -183,18 +180,22 @@ const VideoPreview: React.FC = () => {
         ) : (
           <div className="mb-4">
             <label className="block text-sm font-medium mb-2">选择视频流:</label>
-            <Select
-              style={{ width: 300 }}
-              placeholder="请选择要预览的视频流"
-              value={selectedStreamId}
-              onChange={handleStreamSelect}
-            >
-              {runningStreams.map(stream => (
-                <Option key={stream.id} value={stream.id}>
+            <List
+              bordered
+              dataSource={runningStreams}
+              renderItem={stream => (
+                <List.Item
+                  key={stream.id}
+                  onClick={() => {
+                    setSelectedStreamId(stream.id);
+                    setIsPlaying(false);
+                  }}
+                  style={{ cursor: 'pointer', backgroundColor: selectedStreamId === stream.id ? '#e6f7ff' : 'transparent' }}
+                >
                   {stream.name} ({stream.resolution})
-                </Option>
-              ))}
-            </Select>
+                </List.Item>
+              )}
+            />
           </div>
         )}
       </div>

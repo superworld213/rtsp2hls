@@ -29,13 +29,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
 });
 
 // 类型定义（用于TypeScript）
-// window.electronAPI = {
-//   startFFmpegStream: (config) => Promise.resolve(),
-//   stopFFmpegStream: (id) => Promise.resolve(),
-//   getFFmpegStatus: (id) => Promise.resolve(),
-//   getAllFFmpegStatus: () => Promise.resolve(),
-//   checkFileExists: (filePath) => Promise.resolve(),
-//   createDirectory: (dirPath) => Promise.resolve(),
-//   getSystemInfo: () => Promise.resolve(),
-//   platform: ''
-// };
+window.electronAPI = {
+  startFFmpegStream: (config) => Promise.resolve(),
+  stopFFmpegStream: (id) => Promise.resolve(),
+  getFFmpegStatus: (id) => Promise.resolve(),
+  getAllFFmpegStatus: () => Promise.resolve(),
+  checkFileExists: (filePath) => Promise.resolve(),
+  createDirectory: (dirPath) => Promise.resolve(),
+  getSystemInfo: () => Promise.resolve(),
+  platform: ''
+};

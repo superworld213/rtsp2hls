@@ -15,11 +15,13 @@ const FFmpegStatus: React.FC<FFmpegStatusProps> = ({ onStatusChange }) => {
   const [loading, setLoading] = useState(true);
 
   const checkFFmpegStatus = async () => {
+    console.log("info", "开始检查FFmpeg",window.electronAPI);
+
     if (!window.electronAPI) return;
-    
     setLoading(true);
     try {
       const result = await window.electronAPI.checkFFmpeg();
+      console.log("info", "FFmpeg检查结果", result);
       setFFmpegStatus(result);
       onStatusChange?.(result.available);
     } catch (error) {
