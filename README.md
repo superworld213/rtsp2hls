@@ -22,7 +22,6 @@
 ## 系统要求
 
 - Node.js 18+
-- FFmpeg (需要在系统 PATH 中可用)
 - Windows 10+ / macOS 10.14+ / Linux
 
 ## 安装和运行
@@ -37,27 +36,27 @@ cd rtsp2hls
 
 2. 安装依赖
 ```bash
-pnpm install
+npm install
 ```
 
 3. 启动开发服务器
 ```bash
-pnpm run dev
+npm run dev
 ```
 
 4. 在另一个终端启动 Electron
 ```bash
-pnpm run electron-dev
+npm run electron-dev
 ```
 
 ### 生产构建
 
 ```bash
 # 构建前端
-pnpm run build
+npm run build
 
 # 打包 Electron 应用
-pnpm run dist
+npm run dist
 ```
 
 ## 使用说明
@@ -80,24 +79,21 @@ pnpm run dist
 
 1. 确保至少有一个视频流正在运行
 2. 点击左侧导航栏的「视频预览」
-3. 从下拉列表中选择要预览的视频流
+3. 从列表中选择要预览的视频流
 4. 点击播放按钮开始播放
 
 ### 3. 本地设置
 
 1. 点击左侧导航栏的「本地设置」
 2. 配置以下参数：
-   - **输出目录**: HLS 文件保存位置
    - **日志级别**: 应用日志详细程度
    - **最大并发流**: 同时运行的最大视频流数量
    - **HLS 片段时长**: 每个 HLS 片段的时长
    - **HLS 播放列表大小**: 播放列表中保留的片段数量
 
-## FFmpeg 安装
+## FFmpeg
 
-### Windows
-1. 从 [FFmpeg 官网](https://ffmpeg.org/download.html) 下载 Windows 版本
-2. 解压到任意目录 (如 `C:\ffmpeg`)
+FFmpeg 已被集成到本应用中，您无需手动下载或配置。应用会自动管理 FFmpeg 进程。
 3. 将 `C:\ffmpeg\bin` 添加到系统 PATH 环境变量
 4. 重启命令行，运行 `ffmpeg -version` 验证安装
 
