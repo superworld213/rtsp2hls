@@ -16,7 +16,8 @@
       "output": "builder"
     },
   "win": {
-    "target": "nsis"
+    "target": "nsis",
+    "icon": "./logo.png"
   },
   "nsis": {
     "oneClick": false,

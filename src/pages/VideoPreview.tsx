@@ -1,105 +1,60 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Card, List, Button, Row, Col, Statistic, Alert, Spin } from 'antd';
+import { Card, Button, Row, Col, Statistic, Alert, Spin } from 'antd';
 import { PlayCircleOutlined, PauseCircleOutlined, FullscreenOutlined } from '@ant-design/icons';
 import { useStreamStore } from '../store/useStreamStore';
 import Hls from 'hls.js';
+import { Stream } from '../types/stream';
 
+interface VideoPlayerState {
+  isPlaying: boolean;
+  isLoading: boolean;
+  stats: {
+    duration: string;
+    currentTime: string;
+    resolution: string;
+  };
+}
 
-
-const VideoPreview: React.FC = () => {
-  const { streams, streamStatuses, getStreamStatus } = useStreamStore();
-  const [selectedStreamId, setSelectedStreamId] = useState<string | undefined>();
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+const VideoCard: React.FC<{ stream: Stream }> = ({ stream }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
-  const [videoStats, setVideoStats] = useState({
-    duration: '00:00:00',
-    currentTime: '00:00:00',
-    resolution: '-',
-    bitrate: '-'
+  const [playerState, setPlayerState] = useState<VideoPlayerState>({
+    isPlaying: false,
+    isLoading: false,
+    stats: {
+      duration: '00:00:00',
+      currentTime: '00:00:00',
+      resolution: '-',
+    },
   });
 
-  const selectedStream = streams.find(s => s.id === selectedStreamId);
-  const streamStatus = selectedStreamId ? getStreamStatus(selectedStreamId) : undefined;
-
-  useEffect(() => {
-    // 默认选择第一个运行中的流
-    const runningStreams = streams.filter(stream => {
-      const status = streamStatuses[stream.id];
-      return status && status.status === 'running';
-    });
-    
-    if (runningStreams.length > 0 && !selectedStreamId) {
-      setSelectedStreamId(runningStreams[0].id);
-    }
-  }, [streams, streamStatuses, selectedStreamId]);
-
-
+  const { getStreamStatus } = useStreamStore();
+  const streamStatus = getStreamStatus(stream.id);
 
   const handlePlay = async () => {
-    if (!selectedStreamId) return;
-    
-    setIsLoading(true);
+    setPlayerState(prev => ({ ...prev, isLoading: true }));
     try {
       if (videoRef.current && window.electronAPI) {
-        // 获取HTTP服务器提供的流URL
-        const streamUrlInfo = await window.electronAPI.getStreamUrl(selectedStreamId);
+        const streamUrlInfo = await window.electronAPI.getStreamUrl(stream.id);
         if (streamUrlInfo?.url) {
-          console.log('播放URL:', streamUrlInfo.url);
-          
-          // 清理之前的HLS实例
           if (hlsRef.current) {
             hlsRef.current.destroy();
-            hlsRef.current = null;
           }
-          
-          // 检查浏览器是否原生支持HLS
-          if (videoRef.current.canPlayType('application/vnd.apple.mpegurl')) {
-            // Safari原生支持HLS
-            videoRef.current.src = streamUrlInfo.url;
-          } else if (Hls.isSupported()) {
-            // 使用HLS.js
-            const hls = new Hls({
-              enableWorker: false,
-              lowLatencyMode: true,
-              backBufferLength: 90
-            });
-            hlsRef.current = hls;
-            
-            hls.loadSource(streamUrlInfo.url);
-            hls.attachMedia(videoRef.current);
-            
-            hls.on(Hls.Events.MANIFEST_PARSED, () => {
-              console.log('HLS manifest parsed, ready to play');
-            });
-            
-            hls.on(Hls.Events.ERROR, (event, data) => {
-              console.error('HLS error:', data);
-              if (data.fatal) {
-                switch (data.type) {
-                  case Hls.ErrorTypes.NETWORK_ERROR:
-                    console.log('Network error, trying to recover...');
-                    hls.startLoad();
-                    break;
-                  case Hls.ErrorTypes.MEDIA_ERROR:
-                    console.log('Media error, trying to recover...');
-                    hls.recoverMediaError();
-                    break;
-                  default:
-                    console.log('Fatal error, cannot recover');
-                    hls.destroy();
-                    break;
-                }
-              }
-            });
-          } else {
-            console.error('HLS is not supported in this browser');
-            return;
-          }
-          
-          await videoRef.current.play();
-          setIsPlaying(true);
+          const hls = new Hls({
+            enableWorker: false,
+            lowLatencyMode: true,
+            backBufferLength: 90,
+          });
+          hlsRef.current = hls;
+          hls.loadSource(streamUrlInfo.url);
+          hls.attachMedia(videoRef.current);
+          hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            videoRef.current?.play();
+            setPlayerState(prev => ({ ...prev, isPlaying: true }));
+          });
+          hls.on(Hls.Events.ERROR, (event, data) => {
+            console.error('HLS error:', data);
+          });
         } else {
           console.error('无法获取流URL');
         }
@@ -107,33 +62,17 @@ const VideoPreview: React.FC = () => {
     } catch (error) {
       console.error('播放失败:', error);
     } finally {
-      setIsLoading(false);
+      setPlayerState(prev => ({ ...prev, isLoading: false }));
     }
   };
 
   const handlePause = () => {
-    if (videoRef.current) {
-      videoRef.current.pause();
-      setIsPlaying(false);
-    }
+    videoRef.current?.pause();
+    setPlayerState(prev => ({ ...prev, isPlaying: false }));
   };
-  
-  // 清理HLS实例
-  useEffect(() => {
-    return () => {
-      if (hlsRef.current) {
-        hlsRef.current.destroy();
-        hlsRef.current = null;
-      }
-    };
-  }, []);
 
   const handleFullscreen = () => {
-    if (videoRef.current) {
-      if (videoRef.current.requestFullscreen) {
-        videoRef.current.requestFullscreen();
-      }
-    }
+    videoRef.current?.requestFullscreen();
   };
 
   const updateVideoStats = () => {
@@ -141,15 +80,14 @@ const VideoPreview: React.FC = () => {
       const video = videoRef.current;
       const duration = isNaN(video.duration) ? 0 : video.duration;
       const currentTime = video.currentTime;
-      
-      setVideoStats({
-        duration: formatTime(duration),
-        currentTime: formatTime(currentTime),
-        resolution: video.videoWidth && video.videoHeight 
-          ? `${video.videoWidth}x${video.videoHeight}` 
-          : '-',
-        bitrate: '-' // HLS doesn't provide bitrate info directly
-      });
+      setPlayerState(prev => ({
+        ...prev,
+        stats: {
+          duration: formatTime(duration),
+          currentTime: formatTime(currentTime),
+          resolution: video.videoWidth && video.videoHeight ? `${video.videoWidth}x${video.videoHeight}` : '-',
+        },
+      }));
     }
   };
 
@@ -160,6 +98,52 @@ const VideoPreview: React.FC = () => {
     return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
+  useEffect(() => {
+    return () => {
+      hlsRef.current?.destroy();
+    };
+  }, []);
+
+  return (
+    <Spin spinning={playerState.isLoading} tip="加载视频中...">
+      <Card title={stream.name} bordered={false} className="shadow-lg mb-6">
+        <Row gutter={16}>
+          <Col span={18}>
+            <div className="relative w-full bg-black aspect-video">
+              <video
+                ref={videoRef}
+                className="w-full h-full"
+                onTimeUpdate={updateVideoStats}
+                onLoadedMetadata={updateVideoStats}
+              />
+              <div className="absolute bottom-0 left-0 right-0 p-2 bg-black bg-opacity-50 text-white flex items-center justify-between">
+                <Button
+                  icon={playerState.isPlaying ? <PauseCircleOutlined /> : <PlayCircleOutlined />}
+                  onClick={playerState.isPlaying ? handlePause : handlePlay}
+                  ghost
+                />
+                <span>{playerState.stats.currentTime} / {playerState.stats.duration}</span>
+                <Button icon={<FullscreenOutlined />} onClick={handleFullscreen} ghost />
+              </div>
+            </div>
+          </Col>
+          <Col span={6}>
+            <h3 className="text-lg font-semibold mb-2">视频信息</h3>
+            <Statistic title="状态" value={streamStatus?.status || '未知'} />
+            <Statistic title="分辨率" value={playerState.stats.resolution} />
+            <Statistic title="码率" value={stream.bitrate} />
+            <Statistic title="帧率" value={`${stream.frameRate} FPS`} />
+            <Statistic title="音频" value={stream.audioEnabled ? '开启' : '关闭'} />
+          </Col>
+        </Row>
+      </Card>
+    </Spin>
+  );
+};
+
+const VideoPreview: React.FC = () => {
+  const { streams, streamStatuses } = useStreamStore();
+
   const runningStreams = streams.filter(stream => {
     const status = streamStatuses[stream.id];
     return status && status.status === 'running';
@@ -167,139 +151,20 @@ const VideoPreview: React.FC = () => {
 
   return (
     <div className="p-6">
-      <div className="mb-6">
-        <h2 className="text-2xl font-bold mb-4">视频预览</h2>
-        
-        {runningStreams.length === 0 ? (
-          <Alert
-            message="暂无运行中的视频流"
-            description="请先在视频配置页面添加并启动视频流"
-            type="info"
-            showIcon
-          />
-        ) : (
-          <div className="mb-4">
-            <label className="block text-sm font-medium mb-2">选择视频流:</label>
-            <List
-              bordered
-              dataSource={runningStreams}
-              renderItem={stream => (
-                <List.Item
-                  key={stream.id}
-                  onClick={() => {
-                    setSelectedStreamId(stream.id);
-                    setIsPlaying(false);
-                  }}
-                  style={{ cursor: 'pointer', backgroundColor: selectedStreamId === stream.id ? '#e6f7ff' : 'transparent' }}
-                >
-                  {stream.name} ({stream.resolution})
-                </List.Item>
-              )}
-            />
-          </div>
-        )}
-      </div>
-
-      {selectedStream && (
-        <Row gutter={[16, 16]}>
-          <Col span={16}>
-            <Card title={`${selectedStream.name} - 视频播放器`}>
-              <div className="relative bg-black rounded-lg overflow-hidden" style={{ aspectRatio: '16/9' }}>
-                <video
-                  ref={videoRef}
-                  className="w-full h-full object-contain"
-                  onTimeUpdate={updateVideoStats}
-                  onLoadedMetadata={updateVideoStats}
-                  controls={false}
-                  playsInline
-                />
-                
-                {/* 播放控制覆盖层 */}
-                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-4">
-                  <div className="flex items-center justify-between text-white">
-                    <div className="flex items-center space-x-4">
-                      <Spin spinning={isLoading}>
-                        {isPlaying ? (
-                          <Button
-                            type="text"
-                            icon={<PauseCircleOutlined />}
-                            onClick={handlePause}
-                            className="text-white hover:text-blue-400"
-                            size="large"
-                          />
-                        ) : (
-                          <Button
-                            type="text"
-                            icon={<PlayCircleOutlined />}
-                            onClick={handlePlay}
-                            className="text-white hover:text-blue-400"
-                            size="large"
-                            disabled={!streamStatus?.outputPath}
-                          />
-                        )}
-                      </Spin>
-                      <span className="text-sm">
-                        {videoStats.currentTime} / {videoStats.duration}
-                      </span>
-                    </div>
-                    
-                    <Button
-                      type="text"
-                      icon={<FullscreenOutlined />}
-                      onClick={handleFullscreen}
-                      className="text-white hover:text-blue-400"
-                    />
-                  </div>
-                </div>
-              </div>
-            </Card>
-          </Col>
-          
-          <Col span={8}>
-            <Card title="流状态信息" className="mb-4">
-              <Row gutter={[16, 16]}>
-                <Col span={12}>
-                  <Statistic
-                    title="状态"
-                    value={streamStatus?.status || 'unknown'}
-                    valueStyle={{
-                      color: streamStatus?.status === 'running' ? '#3f8600' : '#cf1322'
-                    }}
-                  />
-                </Col>
-                <Col span={12}>
-                  <Statistic
-                    title="分辨率"
-                    value={videoStats.resolution}
-                  />
-                </Col>
-                <Col span={12}>
-                  <Statistic
-                    title="码率"
-                    value={selectedStream.bitrate}
-                  />
-                </Col>
-                <Col span={12}>
-                  <Statistic
-                    title="帧率"
-                    value={`${selectedStream.frameRate} FPS`}
-                  />
-                </Col>
-              </Row>
-            </Card>
-            
-            <Card title="流配置信息">
-              <div className="space-y-2 text-sm">
-                <div><strong>名称:</strong> {selectedStream.name}</div>
-                <div><strong>RTSP地址:</strong> {selectedStream.rtspUrl}</div>
-                <div><strong>分辨率:</strong> {selectedStream.resolution}</div>
-                <div><strong>码率:</strong> {selectedStream.bitrate}</div>
-                <div><strong>音频:</strong> {selectedStream.audioEnabled ? '启用' : '禁用'}</div>
-                <div><strong>创建时间:</strong> {selectedStream.createdAt.toLocaleString()}</div>
-              </div>
-            </Card>
-          </Col>
-        </Row>
+      <h2 className="text-2xl font-bold mb-4">视频预览</h2>
+      {runningStreams.length === 0 ? (
+        <Alert
+          message="暂无运行中的视频流"
+          description="请先在视频配置页面添加并启动视频流"
+          type="info"
+          showIcon
+        />
+      ) : (
+        <div>
+          {runningStreams.map(stream => (
+            <VideoCard key={stream.id} stream={stream} />
+          ))}
+        </div>
       )}
     </div>
   );

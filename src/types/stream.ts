@@ -1,4 +1,4 @@
-export interface StreamConfig {
+export interface Stream {
   id: string;
   name: string;
   rtspUrl: string;
