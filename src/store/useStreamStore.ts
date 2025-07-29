@@ -1,20 +1,20 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { StreamConfig, StreamStatus, AppSettings, DEFAULT_SETTINGS } from '../types/stream';
+import { Stream, StreamStatus, AppSettings, DEFAULT_SETTINGS } from '../types/stream';
 
 interface StreamStore {
   // 流配置
-  streams: StreamConfig[];
+  streams: Stream[];
   streamStatuses: Record<string, StreamStatus>;
   
   // 应用设置
   settings: AppSettings;
   
   // 流配置操作
-  addStream: (stream: Omit<StreamConfig, 'id' | 'createdAt' | 'updatedAt' | 'status'>) => void;
-  updateStream: (id: string, updates: Partial<StreamConfig>) => void;
+  addStream: (stream: Omit<Stream, 'id' | 'createdAt' | 'updatedAt' | 'status'>) => void;
+  updateStream: (id: string, updates: Partial<Stream>) => void;
   deleteStream: (id: string) => void;
-  getStream: (id: string) => StreamConfig | undefined;
+  getStream: (id: string) => Stream | undefined;
   
   // 流状态操作
   updateStreamStatus: (id: string, status: Partial<StreamStatus>) => void;
@@ -25,7 +25,7 @@ interface StreamStore {
   resetSettings: () => void;
   
   // 工具方法
-  getRunningStreams: () => StreamConfig[];
+  getRunningStreams: () => Stream[];
   getStreamCount: () => number;
 }
 
@@ -36,8 +36,8 @@ export const useStreamStore = create<StreamStore>()(
       streamStatuses: {},
       settings: DEFAULT_SETTINGS,
       
-      addStream: (streamData: Omit<StreamConfig, 'id' | 'createdAt' | 'updatedAt'>) => {
-        const newStream: StreamConfig = {
+      addStream: (streamData: Omit<Stream, 'id' | 'createdAt' | 'updatedAt'>) => {
+        const newStream: Stream = {
           ...streamData,
           id: `stream_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
           status: 'stopped',
@@ -57,7 +57,7 @@ export const useStreamStore = create<StreamStore>()(
         }));
       },
       
-      updateStream: (id: string, updates: Partial<StreamConfig>) => {
+      updateStream: (id: string, updates: Partial<Stream>) => {
         set((state) => ({
           streams: state.streams.map(stream => 
             stream.id === id 

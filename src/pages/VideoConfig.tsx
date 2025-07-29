@@ -4,7 +4,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { PlusOutlined, EditOutlined, DeleteOutlined, PlayCircleOutlined, StopOutlined } from '@ant-design/icons';
 import { useStreamStore } from '../store/useStreamStore';
 import FFmpegStatus from '../components/FFmpegStatus';
-import { StreamConfig } from '../types/stream';
+import { Stream } from '../types/stream';
 import { RESOLUTION_OPTIONS, BITRATE_OPTIONS, FRAME_RATE_OPTIONS } from '../types/stream';
 
 const { Option } = Select;
@@ -32,7 +32,7 @@ const VideoConfig: React.FC = () => {
   } = useStreamStore();
   
   const [isModalVisible, setIsModalVisible] = useState(false);
-  const [editingStream, setEditingStream] = useState<StreamConfig | null>(null);
+  const [editingStream, setEditingStream] = useState<Stream | null>(null);
   const [form] = Form.useForm<StreamFormData>();
   const [loading, setLoading] = useState<Record<string, boolean>>({});
   const [ffmpegAvailable, setFFmpegAvailable] = useState<boolean>(true);
@@ -64,7 +64,7 @@ const VideoConfig: React.FC = () => {
     setIsModalVisible(true);
   };
 
-  const handleEditStream = (stream: StreamConfig) => {
+  const handleEditStream = (stream: Stream) => {
     setEditingStream(stream);
     form.setFieldsValue({
       name: stream.name,
@@ -79,7 +79,7 @@ const VideoConfig: React.FC = () => {
     setIsModalVisible(true);
   };
 
-  const handleDeleteStream = async (stream: StreamConfig) => {
+  const handleDeleteStream = async (stream: Stream) => {
     // 如果流正在运行，先停止它
     const status = getStreamStatus(stream.id);
     if (status?.status === 'running') {
@@ -89,7 +89,7 @@ const VideoConfig: React.FC = () => {
     message.success('删除成功');
   };
 
-  const handleStartStream = async (stream: StreamConfig) => {
+  const handleStartStream = async (stream: Stream) => {
     if (!window.electronAPI) {
       message.error('Electron API 不可用');
       return;
@@ -203,7 +203,7 @@ const VideoConfig: React.FC = () => {
     return <Tag color={config.color}>{config.text}</Tag>;
   };
 
-  const columns: ColumnsType<StreamConfig> = [
+  const columns: ColumnsType<Stream> = [
     {
       title: '名称',
       dataIndex: 'name',
